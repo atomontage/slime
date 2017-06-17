@@ -3,7 +3,7 @@
 ;; URL: https://github.com/slime/slime
 ;; Package-Requires: ((cl-lib "0.5") (macrostep "0.9"))
 ;; Keywords: languages, lisp, slime
-;; Version: 2.18
+;; Version: 2.19
 
 ;;;; License and Commentary
 
@@ -128,8 +128,7 @@ CONTRIBS is a list of contrib packages to load. If `nil', use
 (defun slime--setup-contribs ()
   "Load and initialize contribs."
   (dolist (c slime-contribs)
-    (unless (and (featurep c)
-                 (memq c slime-required-modules))
+    (unless (featurep c)
       (require c)
       (let ((init (intern (format "%s-init" c))))
         (when (fboundp init)
@@ -1317,6 +1316,7 @@ The default condition handler for timer functions (see
     "May the source be with you!"
     "Take this REPL, brother, and may it serve you well."
     "Lemonodor-fame is but a hack away!"
+    "Are we consing yet?"
     ,(format "%s, this could be the start of a beautiful program."
              (slime-user-first-name)))
   "Scientifically-proven optimal words of hackerish encouragement.")
@@ -7493,6 +7493,8 @@ The returned bounds are either nil or non-empty."
 
 (run-hooks 'slime-load-hook)
 (provide 'slime)
+
+(slime-setup)
 
 ;; Local Variables:
 ;; outline-regexp: ";;;;+"

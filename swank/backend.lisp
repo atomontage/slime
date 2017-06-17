@@ -161,6 +161,13 @@ form suitable for testing with #+."
    (and (find-package package)
         (find-symbol (string name) package))))
 
+(defun choose-symbol (package name alt-package alt-name)
+  "If symbol package:name exists return that symbol, otherwise alt-package:alt-name.
+  Suitable for use with #."
+  (or (and (find-package package)
+           (find-symbol (string name) package))
+      (find-symbol (string alt-name) alt-package)))
+
 
 ;;;; UFT8
 
@@ -611,7 +618,7 @@ Return nil if the file contains no special markers."
       (loop while (and (< p end)
                        (member (aref str p) '(#\space #\tab)))
             do (incf p))
-      (let ((end (position-if (lambda (c) (find c '(#\space #\tab #\newline)))
+      (let ((end (position-if (lambda (c) (find c '(#\space #\tab #\newline #\;)))
                               str :start p)))
         (find-external-format (subseq str p end))))))
 
@@ -719,7 +726,7 @@ return the results and T.  Otherwise, return the original form and
 NIL."
   (let ((fun (and (consp form)
                   (valid-function-name-p (car form))
-                  (compiler-macro-function (car form)))))
+                  (compiler-macro-function (car form) env))))
     (if fun
 	(let ((result (funcall *macroexpand-hook* fun form env)))
           (values result (not (eq result form))))
@@ -1309,6 +1316,14 @@ Don't execute unwind-protected sections, don't raise conditions.
 
 (definterface receive-if (predicate &optional timeout)
   "Return the first message satisfiying PREDICATE.")
+
+(definterface wake-thread (thread)
+  "Trigger a call to CHECK-SLIME-INTERRUPTS in THREAD without using
+asynchronous interrupts."
+  (declare (ignore thread))
+  ;; Doesn't have to implement this if RECEIVE-IF periodically calls
+  ;; CHECK-SLIME-INTERRUPTS, but that's energy inefficient
+  nil)
 
 (definterface register-thread (name thread)
   "Associate the thread THREAD with the symbol NAME.
