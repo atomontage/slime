@@ -994,26 +994,16 @@ returns.")
 
 ;;;; Definition finding
 
-(defstruct (:location (:type list) :named
+(defstruct (location (:type list)
                       (:constructor make-location
-                                    (buffer position &optional hints)))
+                          (buffer position &optional hints)))
+  (type :location)
   buffer position
   ;; Hints is a property list optionally containing:
   ;;   :snippet SOURCE-TEXT
   ;;     This is a snippet of the actual source text at the start of
   ;;     the definition, which could be used in a text search.
   hints)
-
-(defstruct (:error (:type list) :named (:constructor)) message)
-
-;;; Valid content for BUFFER slot
-(defstruct (:file       (:type list) :named (:constructor)) name)
-(defstruct (:buffer     (:type list) :named (:constructor)) name)
-(defstruct (:etags-file (:type list) :named (:constructor)) filename)
-
-;;; Valid content for POSITION slot
-(defstruct (:position (:type list) :named (:constructor)) pos)
-(defstruct (:tag      (:type list) :named (:constructor)) tag1 tag2)
 
 (defmacro converting-errors-to-error-location (&body body)
   "Catches errors during BODY and converts them to an error location."
