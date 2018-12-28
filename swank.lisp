@@ -957,18 +957,6 @@ The processing is done in the extent of the toplevel restart."
     (with-panic-handler (connection)
       (loop (dispatch-event connection (receive))))))
 
-(defvar *auto-flush-interval* 0.08)
-
-(defun auto-flush-loop (stream)
-  (loop
-   (when (not (and (open-stream-p stream)
-                   (output-stream-p stream)))
-     (return nil))
-   (force-output stream)
-   (setf (swank/gray::flush-scheduled stream) nil)
-   (receive-if #'identity)
-   (sleep *auto-flush-interval*)))
-
 (defgeneric thread-for-evaluation (connection id)
   (:documentation "Find or create a thread to evaluate the next request.")
   (:method ((connection multithreaded-connection) (id (eql t)))
@@ -1379,13 +1367,13 @@ entered nothing, returns NIL when user pressed C-g."
                                            ,prompt ,initial-value))
     (third (wait-for-event `(:emacs-return ,tag result)))))
 
-(defstruct (unredable-result
-            (:constructor make-unredable-result (string))
+(defstruct (unreadable-result
+            (:constructor make-unreadable-result (string))
             (:copier nil)
             (:print-object
              (lambda (object stream)
                (print-unreadable-object (object stream :type t)
-                 (princ (unredable-result-string object) stream)))))
+                 (princ (unreadable-result-string object) stream)))))
   string)
 
 (defun process-form-for-emacs (form)
@@ -1422,7 +1410,7 @@ converted to lower case."
 				  ,(process-form-for-emacs form)))
 	   (let ((value (caddr (wait-for-event `(:emacs-return ,tag result)))))
 	     (dcase value
-               ((:unreadable value) (make-unredable-result value))
+               ((:unreadable value) (make-unreadable-result value))
 	       ((:ok value) value)
                ((:error kind . data) (error "~a: ~{~a~}" kind data))
 	       ((:abort) (abort))))))))
@@ -2975,7 +2963,16 @@ If non-nil, called with two arguments SPEC and TRACED-P." )
     (do-find (string-left-trim *find-definitions-left-trim* name))
     (do-find (string-left-trim *find-definitions-left-trim*
                                (string-right-trim
-                                *find-definitions-right-trim* name)))))
+                                *find-definitions-right-trim* name)))
+    ;; Not exactly robust
+    (when (and (eql (search "(setf " name :test #'char-equal) 0)
+               (char= (char name (1- (length name))) #\)))
+      (multiple-value-bind (symbol found)
+          (with-buffer-syntax ()
+            (parse-symbol (subseq name (length "(setf ")
+                                  (1- (length name)))))
+        (when found
+          (values `(setf ,symbol) t))))))
 
 (defslimefun find-definitions-for-emacs (name)
   "Return a list ((DSPEC LOCATION) ...) of definitions for NAME.
@@ -3385,7 +3382,7 @@ Return NIL if LIST is circular."
    (let ((content (hash-table-to-alist ht)))
      (cond ((every (lambda (x) (typep (first x) '(or string symbol))) content)
             (setf content (sort content 'string< :key #'first)))
-           ((every (lambda (x) (typep (first x) 'number)) content)
+           ((every (lambda (x) (typep (first x) 'real)) content)
             (setf content (sort content '< :key #'first))))
      (loop for (key . value) in content appending
            `((:value ,key) " = " (:value ,value)

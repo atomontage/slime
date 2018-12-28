@@ -13,6 +13,7 @@
 
 (in-package swank/clasp)
 
+#+(or)
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (setq swank::*log-output* (open "/tmp/slime.log" :direction :output))
   (setq swank:*log-events* t))
@@ -60,8 +61,8 @@
   ;; ECLs swank implementation says that CLOS is not thread safe and
   ;; I use ECLs CLOS implementation - this is a worry for the future.
   ;; nil or  :spawn
-;;  nil
- :spawn
+  ;; nil
+  :spawn
 #|  #+threads :spawn
   #-threads nil
 |#
@@ -313,7 +314,7 @@
                (multiple-value-setq (fasl-file warnings-p failure-p)
                  (let ((truename (or filename (note-buffer-tmpfile tmp-file buffer))))
                    (compile-file tmp-file
-                                 :source-debug-namestring truename
+                                 :source-debug-pathname (pathname truename)
                                  :source-debug-offset (1- position)))))
           (when fasl-file (load fasl-file))
           (when (probe-file tmp-file)
@@ -469,24 +470,27 @@
          (*ihs-current* *ihs-top*)
          #+frs         (*frs-base* (or (sch-frs-base *frs-top* *ihs-base*) (1+ (frs-top))))
          #+frs         (*frs-top* (frs-top))
-         (*tpl-level* (1+ *tpl-level*))
-         (*backtrace* (core::common-lisp-backtrace-frames
-                       :gather-start-trigger
-                       (lambda (frame) (string= (core::backtrace-frame-print-name frame)
-                                                "UNIVERSAL-ERROR-HANDLER"))
-                       :gather-all-frames t)))
-    (declare (special *ihs-current*))
-    #+frs    (loop for f from *frs-base* until *frs-top*
-                   do (let ((i (- (si::frs-ihs f) *ihs-base* 1)))
-                        (when (plusp i)
-                          (let* ((x (elt *backtrace* i))
-                                 (name (si::frs-tag f)))
-                            (unless (si::fixnump name)
-                              (push name (third x)))))))
-    (set-break-env)
-    (set-current-ihs)
-    (let ((*ihs-base* *ihs-top*))
-      (funcall debugger-loop-fn))))
+         (*tpl-level* (1+ *tpl-level*)))
+    (core:call-with-backtrace
+     (lambda (raw-backtrace)
+       (let ((*backtrace*
+               (let ((backtrace (core::common-lisp-backtrace-frames
+                                 raw-backtrace
+                                 :gather-start-trigger
+                                 (lambda (frame)
+                                   (let ((function-name (core::backtrace-frame-function-name frame)))
+                                     (and (symbolp function-name)
+                                          (eq function-name 'core::universal-error-handler))))
+                                 :gather-all-frames nil)))
+                 (unless backtrace
+                   (setq backtrace (core::common-lisp-backtrace-frames
+                                    :gather-all-frames nil)))
+                 backtrace)))
+         (declare (special *ihs-current*))
+         (set-break-env)
+         (set-current-ihs)
+         (let ((*ihs-base* *ihs-top*))
+           (funcall debugger-loop-fn)))))))
 
 (defimplementation compute-backtrace (start end)
   (subseq *backtrace* start
@@ -505,6 +509,10 @@
       (symbol
        (and (fboundp x)
             (fdefinition x)))
+      (cons
+       (if (eq (car x) 'cl:setf)
+           (fdefinition x)
+           nil))
       (function
        x))))
 
@@ -535,7 +543,7 @@
     (nconc
      (loop for arg across (core::backtrace-frame-arguments frame)
            for i from 0
-           collect (list :name (intern (format nil "ARG~d" i) #.*package*)
+           collect (list :name (intern (format nil "ARG~d" i) :cl-user)
                          :id 0
                          :value arg))
      locals)))
@@ -553,8 +561,19 @@
     (disassemble fun)))
 
 (defimplementation eval-in-frame (form frame-number)
-  (let ((env nil)) ; (second (elt *backtrace* frame-number))))
-    (core:compile-form-and-eval-with-env form env)))
+  (let* ((frame (elt *backtrace* frame-number))
+         (raw-arg-values (coerce (core::backtrace-frame-arguments frame) 'list)))
+    (if (and (= (length raw-arg-values) 2) (core:vaslistp (car raw-arg-values)))
+        (let* ((arg-values (core:list-from-va-list (car raw-arg-values)))
+               (bindings (append (loop for i from 0 for value in arg-values collect `(,(intern (core:bformat nil "ARG%d" i) :cl-user) ',value))
+                                 (list (list (intern "NEXT-METHODS" :cl-user) (cadr raw-arg-values))))))
+          (eval
+           `(let (,@bindings) ,form)))
+        (let* ((arg-values raw-arg-values)
+               (bindings (loop for i from 0 for value in arg-values collect `(,(intern (core:bformat nil "ARG%d" i) :cl-user) ',value))))
+          (eval
+           `(let (,@bindings) ,form))))))
+
 
 #+clasp-working
 (defimplementation gdb-initial-commands ()
