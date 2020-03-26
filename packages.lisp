@@ -184,6 +184,8 @@
            #:quit-lisp
            #:eval-for-emacs
            #:eval-in-emacs
+           #:ed-rpc
+           #:ed-rpc-no-wait
            #:y-or-n-p-in-emacs
            #:*find-definitions-right-trim*
            #:*find-definitions-left-trim*
@@ -194,4 +196,7 @@
            #:parse-string
            #:from-string
            #:to-string
-           #:*swank-debugger-condition*))
+           #:*swank-debugger-condition*
+           #:run-hook-with-args-until-success
+           #:make-output-function-for-target
+           #:make-output-stream-for-target))

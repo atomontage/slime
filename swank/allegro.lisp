@@ -422,7 +422,12 @@
              (when loc
                (destructuring-bind (file . pos) loc
                  (let ((start (if (consp pos) ; 8.2 and newer
-                                  (car pos)
+                                  #+(version>= 10 1)
+                                  (if (typep condition 'excl::compiler-inconsistent-name-usage-warning)
+                                      (second pos)
+                                      (first pos))
+                                  #-(version>= 10 1)
+                                  (first pos)
                                   pos)))
                    (values file start)))))))))
 
@@ -463,6 +468,9 @@
                :message (format nil "Undefined function referenced: ~S"
                                 fname)
                :location (make-location (list :file file)
+                                        #+(version>= 9 0)
+                                        (list :offset 1 pos)
+                                        #-(version>= 9 0)
                                         (list :position (1+ pos)))))))))
 
 (defimplementation call-with-compilation-hooks (function)
@@ -559,8 +567,8 @@ to do this, this factors in the length of the inserted header itself."
        (not failure?)))))
 
 (defimplementation swank-compile-string (string &key buffer position filename
-                                         policy)
-  (declare (ignore policy))
+                                                line column policy)
+  (declare (ignore line column policy))
   (handler-case
       (with-compilation-hooks ()
         (let ((*buffer-name* buffer)
@@ -905,21 +913,37 @@ to do this, this factors in the length of the inserted header itself."
             (nconc (mailbox.queue mbox) (list message)))
       (mp:open-gate (mailbox.gate mbox)))))
 
+(defimplementation wake-thread (thread)
+  (let* ((mbox (mailbox thread)))
+    (mp:open-gate (mailbox.gate mbox))))
+
 (defimplementation receive-if (test &optional timeout)
   (let ((mbox (mailbox mp:*current-process*)))
-    (assert (or (not timeout) (eq timeout t)))
-    (loop
-     (check-slime-interrupts)
-     (mp:with-process-lock ((mailbox.lock mbox))
-       (let* ((q (mailbox.queue mbox))
-              (tail (member-if test q)))
-         (when tail
-           (setf (mailbox.queue mbox) (nconc (ldiff q tail) (cdr tail)))
-           (return (car tail)))
-         (mp:close-gate (mailbox.gate mbox))))
-     (when (eq timeout t) (return (values nil t)))
-     (mp:process-wait-with-timeout "receive-if" 0.5
-                                   #'mp:gate-open-p (mailbox.gate mbox)))))
+    (flet ((open-mailbox ()
+             ;; this opens the mailbox and returns if has the message
+             ;; we are expecting.  But first, check for interrupts.
+             (check-slime-interrupts)
+             (mp:with-process-lock ((mailbox.lock mbox))
+               (let* ((q (mailbox.queue mbox))
+                      (tail (member-if test q)))
+                 (when tail
+                   (setf (mailbox.queue mbox) (nconc (ldiff q tail) (cdr tail)))
+                   (return-from receive-if (car tail)))
+                 ;; ...if it doesn't, we close the gate (even if it
+                 ;; was already closed)
+                 (mp:close-gate (mailbox.gate mbox))))))
+      (cond (timeout
+             ;; open the mailbox and return asap
+             (open-mailbox)
+             (return-from receive-if (values nil t)))
+            (t
+             ;; wait until gate open, then open mailbox.  If there's
+             ;; no message there, repeat forever.
+             (loop
+               (mp:process-wait
+                "receive-if (waiting on gate)"
+                #'mp:gate-open-p (mailbox.gate mbox))
+               (open-mailbox)))))))
 
 (let ((alist '())
       (lock (mp:make-process-lock :name "register-thread")))
